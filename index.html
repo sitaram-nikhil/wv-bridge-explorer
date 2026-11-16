@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WV Bridge Explorer</title>
+<meta name="description" content="Map of West Virginia bridges and their condition, from the FHWA National Bridge Inventory.">
+<link rel="stylesheet" href="css/fonts.css">
+<link rel="stylesheet" href="vendor/maplibre-gl.css">
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+<header class="top">
+  <div class="hd">
+    <div class="logo" aria-hidden="true">WV</div>
+    <div>
+      <h1>WV Bridge Explorer <span class="badge">WV DOT</span></h1>
+      <div class="s" id="asof">Loading bridge data…</div>
+    </div>
+    <span class="sp"></span>
+    <button type="button" class="about-btn" id="about-open">About this data</button>
+    <nav class="tabs" aria-label="Screens">
+      <button type="button" class="on" data-tab="map">Map</button><button type="button" data-tab="summary">Summary</button><button type="button" data-tab="downloads">Downloads</button>
+    </nav>
+  </div>
+  <div class="bar" role="search">
+    <input id="q" type="search" placeholder="Search bridge, route, county or ID" aria-label="Search bridges" autocomplete="off">
+    <select id="f-cond" aria-label="Condition"><option value="">All conditions</option><option value="2">Poor</option><option value="1">Fair</option><option value="0">Good</option></select>
+    <select id="f-county" aria-label="County"><option value="">All counties</option></select>
+    <select id="f-route" aria-label="Route"><option value="">All routes</option></select>
+    <select id="f-type" aria-label="Bridge type"><option value="">All bridge types</option></select>
+    <select id="f-year" aria-label="Year built">
+      <option value="">Any year built</option>
+      <option value="0-1939">Before 1940</option><option value="1940-1959">1940 to 1959</option>
+      <option value="1960-1979">1960 to 1979</option><option value="1980-1999">1980 to 1999</option>
+      <option value="2000-2009">2000 to 2009</option><option value="2010-9999">2010 or later</option>
+    </select>
+    <select id="f-owner" aria-label="Owner"><option value="">All owners</option><option value="1">WVDOH only</option><option value="0">Other owners</option></select>
+    <label class="chk"><input type="checkbox" id="f-scour"> Flood erosion risk only</label>
+    <label class="chk"><input type="checkbox" id="f-cam"> Has live camera</label>
+    <button class="clr" id="clear" type="button">Clear</button>
+  </div>
+</header>
+
+<section class="kpis" aria-label="Counts for the bridges shown">
+  <div class="kpi"><span>Bridges shown</span><b id="k-all">–</b></div>
+  <div class="kpi p"><span>Poor</span><b id="k-poor">–</b></div>
+  <div class="kpi f"><span>Fair</span><b id="k-fair">–</b></div>
+  <div class="kpi g"><span>Good</span><b id="k-good">–</b></div>
+  <div class="kpi s"><span>Flood erosion risk</span><b id="k-scour">–</b></div>
+  <div class="kpi gd"><span>With a camera</span><b id="k-cam">–</b></div>
+</section>
+
+<main id="content">
+<div class="main">
+  <div class="map-wrap">
+    <div id="map" aria-label="Map of West Virginia bridges"></div>
+    <div class="maptools">
+      <button type="button" id="b-3d" class="on" title="Turn the 3D hills on or off">3D</button>
+      <button type="button" id="b-home" title="Show the whole state">
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M3 11l9-7 9 7v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z" fill="currentColor"/></svg>
+      </button>
+    </div>
+    <div class="basemap" role="group" aria-label="Background">
+      <button type="button" data-base="hybrid" class="on">Satellite</button><button type="button" data-base="photo">Photo only</button><button type="button" data-base="topo">Map</button>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--good)"></i>Good</span>
+      <span><i style="background:var(--fair)"></i>Fair</span>
+      <span><i style="background:var(--poor)"></i>Poor</span>
+      <span title="Rings appear when you zoom in"><i class="ring"></i>Flood erosion risk (zoom in)</span>
+      <span><i class="camkey"></i>Live camera</span>
+    </div>
+    <div class="loading" id="loading">Loading 7,000+ bridges…</div>
+  </div>
+
+  <aside class="panel" id="panel" aria-label="Bridges">
+    <div class="view" id="view-list">
+      <div class="ph">
+        <h2>Bridges</h2>
+        <div class="sub" id="list-sub">Poor bridges with the most traffic are listed first.</div>
+      </div>
+      <ol class="list" id="list"></ol>
+      <div class="more" id="more"></div>
+    </div>
+    <div class="view" id="view-detail" hidden>
+      <div class="ph">
+        <button type="button" class="back" id="back">
+          <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Back to list
+        </button>
+        <h2 id="d-name"></h2>
+        <div class="sub"><span id="d-sub"></span> <span class="id" id="d-id"></span></div>
+      </div>
+      <div class="scroll" id="d-body"></div>
+    </div>
+  </aside>
+</div>
+
+<section class="summary" id="summary" hidden aria-label="Summary">
+  <div class="sumnote" id="sum-note"></div>
+  <div class="sgrid">
+    <div class="card">
+      <h2>Condition</h2>
+      <div id="ch-cond"></div>
+      <p class="cap" id="cap-cond"></p>
+      <h3>Which part is rated lowest</h3>
+      <div id="ch-part"></div>
+      <p class="cap">Counts each bridge once, by the part with its lowest rating. Ties count toward the first part listed.</p>
+    </div>
+    <div class="card">
+      <h2>By age</h2>
+      <div id="ch-age"></div>
+      <p class="cap" id="cap-age"></p>
+    </div>
+    <div class="card">
+      <div class="cardhead"><h2>By county</h2>
+        <select id="cty-sort" aria-label="Sort counties"><option value="poor">Most poor bridges</option><option value="share">Highest share poor</option><option value="all">Most bridges</option><option value="name">A to Z</option></select></div>
+      <div class="scrollbox" id="ch-county"></div>
+      <p class="cap">Select a county to see it on the map.</p>
+    </div>
+    <div class="card">
+      <h2>By bridge type</h2>
+      <div id="ch-type"></div>
+      <p class="cap" id="cap-type"></p>
+    </div>
+  </div>
+  <div class="card watch">
+    <div class="cardhead">
+      <div><h2>Watch list: poor bridges with heavy traffic</h2>
+        <p class="cap" id="cap-watch"></p></div>
+      <div class="wtools">
+        <label>Vehicles a day, at least <select id="w-min"><option value="5000">5,000</option><option value="10000" selected>10,000</option><option value="20000">20,000</option><option value="40000">40,000</option></select></label>
+        <button type="button" class="btn" id="w-csv">Download CSV</button>
+      </div>
+    </div>
+    <div class="tablebox" tabindex="0" aria-label="Watch list table, scrollable">
+      <table class="wt" id="wt">
+        <thead><tr>
+          <th data-k="name" scope="col">Bridge</th><th data-k="county" scope="col">County</th>
+          <th data-k="adt" scope="col" class="num">Vehicles a day</th><th data-k="year" scope="col" class="num">Built</th>
+          <th data-k="low" scope="col">Lowest part</th><th data-k="status" scope="col">Open, posted or closed</th>
+          <th data-k="scour" scope="col">Flood risk</th><th data-k="cam" scope="col">Camera</th>
+        </tr></thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section class="summary downloads" id="downloads" hidden aria-label="Downloads">
+  <div class="sumnote" id="dl-note"></div>
+  <div class="card dlscope">
+    <h2>Which bridges</h2>
+    <label class="opt"><input type="radio" name="dl-scope" value="shown" checked> <span><b>Bridges matching my search and filters</b> <span id="dl-n-shown"></span></span></label>
+    <label class="opt"><input type="radio" name="dl-scope" value="all"> <span><b>All bridges in West Virginia</b> <span id="dl-n-all"></span></span></label>
+  </div>
+  <div class="sgrid">
+    <div class="card">
+      <h2>Google Earth file</h2>
+      <p class="cap">One pin per bridge, colored by condition and grouped into Poor, Fair and Good folders. Click a pin in Google Earth to see the bridge's ratings, facts and links back to this app and to Street View.</p>
+      <button type="button" class="btn p" id="dl-kml">Download for Google Earth (.kmz)</button>
+      <div class="dlstat" id="kml-stat"></div>
+      <h3>How to open it</h3>
+      <ul class="steps">
+        <li><b>Google Earth on the web:</b> open earth.google.com, select <i>Projects</i>, then <i>New project</i>, then <i>Import KML file from computer</i> (it accepts .kmz files too).</li>
+        <li><b>Google Earth Pro (desktop):</b> select <i>File</i>, then <i>Open</i>, and choose the file.</li>
+      </ul>
+    </div>
+    <div class="card">
+      <h2>Excel spreadsheet</h2>
+      <p class="cap">One row per bridge with every field in this app: condition and the rating of each part, open, posted or closed, flood erosion risk, traffic, size, type, last inspection, live camera, map location and a link to the bridge in this app. A second sheet explains the source and the ratings.</p>
+      <button type="button" class="btn p" id="dl-xlsx">Download Excel file (.xlsx)</button>
+      <div class="dlstat" id="xlsx-stat"></div>
+      <h3>Good to know</h3>
+      <ul class="steps">
+        <li>The first row stays in place as you scroll, and every column has a filter button.</li>
+        <li>Ratings are numbers from 0 (failed) to 9 (excellent). A blank rating means that part is not rated separately for that bridge.</li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<dialog class="about" id="about" aria-labelledby="about-h">
+  <div class="ph"><h2 id="about-h">About this data</h2><button type="button" class="x" id="about-close" aria-label="Close">×</button></div>
+  <div class="ab">
+    <h3>Where it comes from</h3>
+    <ul>
+      <li><b>Bridges:</b> <span id="ab-src"></span>, published by the Federal Highway Administration (FHWA). It holds every public bridge over 20 feet in West Virginia. Ratings come from WVDOH's routine inspections; most inspection dates in this file are from 2023 and 2024.</li>
+      <li><b>Live cameras:</b> WV511 traffic cameras, run by WVDOH. Camera list checked <span id="ab-cam"></span>.</li>
+      <li><b>Map:</b> USGS The National Map imagery and topographic maps (public domain). 3D hills: AWS Terrain Tiles (open data).</li>
+      <li><b>Street View and Google Earth</b> links open Google's own sites.</li>
+    </ul>
+    <h3>How to read the condition</h3>
+    <ul>
+      <li>Inspectors rate each main part from 9 (excellent) to 0 (failed): the deck, the beams that hold it up, and the supports it sits on. Culverts get one rating.</li>
+      <li>A part rated 7 to 9 is <b>Good</b>, 5 to 6 is <b>Fair</b>, 0 to 4 is <b>Poor</b>. A bridge's overall condition is its weakest part.</li>
+      <li><b>Poor does not mean unsafe.</b> Bridges that are not safe for some loads are posted with weight limits or closed; the bridge panel shows which.</li>
+      <li><b>Flood erosion risk</b> means the bridge is listed as scour critical: its supports could be undermined if a flood washes away the streambed around them.</li>
+    </ul>
+    <h3>Limits</h3>
+    <ul>
+      <li>The data is as of the federal file, not today. Bridges may have been repaired, inspected again or replaced since.</li>
+      <li>The 3D models are simplified drawings from each bridge's size and type. They show which part has the problem, not the exact spot.</li>
+      <li>Cameras point at traffic and may not show the bridge itself. They go offline from time to time.</li>
+      <li>One bridge has no map location, two may sit a few miles off, and one has a traffic count that looks wrong (600,500 a day). These are marked where they appear.</li>
+    </ul>
+    <p class="cap">Built only on free, public data. Open-source software: MapLibre GL JS (BSD-3-Clause), three.js (MIT), hls.js (Apache-2.0), Plus Jakarta Sans and JetBrains Mono (SIL Open Font License).</p>
+  </div>
+</dialog>
+
+<footer class="foot">
+  <span id="src">Source: FHWA National Bridge Inventory.</span> <span id="asof2"></span>
+  Map imagery: USGS The National Map. 3D hills: AWS Terrain Tiles. Live cameras: WV511 (WVDOH). Free, public data only.
+</footer>
+
+<script src="vendor/maplibre-gl.js"></script>
+<script src="js/export.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
