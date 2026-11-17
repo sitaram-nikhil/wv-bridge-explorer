@@ -495,6 +495,52 @@
     else if (tab === 'downloads') renderDownloads();
     else map.resize();
   }
+  // Drag handle: resize the map and the side panel (width saved in this browser).
+  (function () {
+    var sp = $('splitter'), main = document.querySelector('.main');
+    if (!sp || !main) return;
+    var KEY = 'wvbe.panelWidth', DEF = 330, MIN = 300, MAP_MIN = 320;
+    function maxW() { return Math.max(MIN, Math.min(main.clientWidth - MAP_MIN - 14 - 28, Math.round(window.innerWidth * 0.7))); }
+    var resizeQueued = false;
+    function apply(w, save) {
+      w = Math.round(Math.max(MIN, Math.min(maxW(), w)));
+      main.style.setProperty('--pw', w + 'px');
+      sp.setAttribute('aria-valuemin', MIN); sp.setAttribute('aria-valuemax', maxW()); sp.setAttribute('aria-valuenow', w);
+      if (!resizeQueued) { resizeQueued = true; requestAnimationFrame(function () { resizeQueued = false; map.resize(); }); }
+      if (save) { try { if (w === DEF) localStorage.removeItem(KEY); else localStorage.setItem(KEY, w); } catch (e) {} }
+      return w;
+    }
+    function cur() { return parseInt(getComputedStyle(main).getPropertyValue('--pw'), 10) || DEF; }
+    var saved = null; try { saved = parseInt(localStorage.getItem(KEY), 10); } catch (e) {}
+    apply(saved || DEF, false);
+    var startX = 0, startW = 0;
+    sp.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      e.preventDefault(); sp.setPointerCapture(e.pointerId);
+      startX = e.clientX; startW = cur();
+      sp.classList.add('drag'); document.body.classList.add('resizing');
+    });
+    sp.addEventListener('pointermove', function (e) {
+      if (!sp.hasPointerCapture(e.pointerId)) return;
+      apply(startW + (startX - e.clientX), false);
+    });
+    function end(e) {
+      if (!sp.hasPointerCapture(e.pointerId)) return;
+      sp.releasePointerCapture(e.pointerId);
+      sp.classList.remove('drag'); document.body.classList.remove('resizing');
+      apply(cur(), true);
+    }
+    sp.addEventListener('pointerup', end); sp.addEventListener('pointercancel', end);
+    sp.addEventListener('dblclick', function () { apply(DEF, true); });
+    sp.addEventListener('keydown', function (e) {
+      var step = e.shiftKey ? 80 : 20, w = cur();
+      if (e.key === 'ArrowLeft') w += step; else if (e.key === 'ArrowRight') w -= step;
+      else if (e.key === 'Home') w = DEF; else if (e.key === 'End') w = maxW(); else return;
+      e.preventDefault(); apply(w, true);
+    });
+    window.addEventListener('resize', function () { if (main.clientWidth) apply(cur(), false); });
+  })();
+
   function pct(a, b) { return b ? Math.round(a / b * 100) : 0; }
   function stackRow(label, counts, maxTotal, opts) {
     opts = opts || {};
