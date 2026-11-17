@@ -8,7 +8,7 @@ ROOT=_os.path.dirname(_os.path.dirname(_os.path.abspath(__file__)))+'/'   # the 
 WORK=ROOT+'tools/work/'   # downloaded and in-between files (not published)
 import json, re, numpy as np
 W=ROOT
-B=json.load(open(WORK+'bridges.json'))
+B=json.load(open(WORK+'bridges.json'))['bridges']
 C=json.load(open(WORK+'cams/wv511_cams.json'))['cams']
 def norm_route(r):
     r=r.upper().replace('US','US ').replace('WV','WV ').replace('I-','I ').replace('-',' ')
