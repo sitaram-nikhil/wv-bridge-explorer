@@ -1056,8 +1056,12 @@
     document.querySelectorAll('.basemap button').forEach(function (btn) { btn.addEventListener('click', function () { setBase(btn.dataset.base); }); });
   }
 
-  var dataReady = load();
-  map.on('load', function () {
+  // Start as soon as the map style is ready. Waiting for the 'load' event also waits for every
+  // background tile, and when USGS returns errors for some tiles that event can stall indefinitely.
+  var dataReady = load(), started = false;
+  function start() {
+    if (started) return;
+    started = true;
     dataReady.then(function (res) {
       prepare(res[0]);
       attachCams(res[3]);
@@ -1085,5 +1089,46 @@
       el.classList.add('err');
       console.error(err);
     });
+  }
+  map.on('style.load', start);
+  map.on('load', start);
+  if (map.isStyleLoaded()) start();
+  // Safety net: if the map has not drawn after a few seconds, ask it to redraw.
+  [3000, 7000].forEach(function (ms) {
+    setTimeout(function () { if (!$('loading').hidden || !started) { map.resize(); map.triggerRepaint(); if (!started && map.isStyleLoaded()) start(); } }, ms);
   });
+
+  // If the labeled satellite map keeps failing at USGS, switch to Photo only and say so.
+  var baseChosen = false, hybridErrors = 0, baseNoteShown = false;
+  document.querySelectorAll('.basemap button').forEach(function (btn) { btn.addEventListener('click', function () { baseChosen = true; hideBaseNote(); }); });
+  function hideBaseNote() { var n = $('basenote'); if (n) n.hidden = true; }
+  // The map library ignores 'not found' tiles silently, so check the USGS service directly:
+  // a quick test of three statewide tiles at startup, plus a count of failed tiles while browsing
+  // (browsers that report tile status, such as Chrome and Edge).
+  function hybridFailing() {
+    if (baseChosen || baseNoteShown) return;
+    if (!map.getLayer('hybrid') || map.getLayoutProperty('hybrid', 'visibility') === 'none') return;
+    baseNoteShown = true;
+    setBase('photo');
+    var n = $('basenote');
+    if (n) { n.hidden = false; setTimeout(hideBaseNote, 15000); }
+  }
+  var probes = ['7/48/35', '7/48/36', '7/49/35'].map(function (t) {
+    return fetch(USGS + 'USGSImageryTopo/MapServer/tile/' + t, { mode: 'cors', cache: 'no-store' })
+      .then(function (r) { return r.ok; }, function () { return false; });
+  });
+  Promise.all(probes).then(function (ok) {
+    if (ok.filter(function (x) { return !x; }).length >= 2) {
+      if (started && map.isStyleLoaded()) hybridFailing(); else map.once('style.load', hybridFailing);
+    }
+  });
+  if (window.PerformanceObserver) {
+    try {
+      new PerformanceObserver(function (list) {
+        list.getEntries().forEach(function (e) {
+          if (e.name.indexOf('USGSImageryTopo') !== -1 && e.responseStatus >= 400) { hybridErrors++; if (hybridErrors >= 8) hybridFailing(); }
+        });
+      }).observe({ type: 'resource', buffered: true });
+    } catch (e) {}
+  }
 })();
