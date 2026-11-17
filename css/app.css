@@ -43,7 +43,7 @@ button{font:inherit;cursor:pointer}
 .kpi.g{border-top-color:var(--good)}.kpi.g b{color:var(--good)}
 
 /* Map + panel */
-.main{flex:1;display:grid;grid-template-columns:1fr 330px;gap:10px;padding:0 14px 10px;min-height:520px}
+.main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 14px var(--pw,330px);gap:0;padding:0 14px 10px;min-height:520px}
 .map-wrap{position:relative;border-radius:10px;overflow:hidden;border:1px solid var(--line-2);background:#2b3a2c;min-height:520px}
 #map{position:absolute;inset:0}
 .maptools{position:absolute;right:10px;top:104px;display:flex;flex-direction:column;gap:5px;z-index:2}
@@ -93,7 +93,9 @@ button{font:inherit;cursor:pointer}
 
 /* Narrow windows and the side panel */
 @media (max-width:860px){
-  .main{grid-template-columns:1fr;grid-template-rows:auto auto}
+  .main{grid-template-columns:1fr;grid-template-rows:auto auto;gap:10px}
+  .splitter{display:none}
+  .m3d{height:220px}
   .map-wrap{min-height:460px}
   .panel{max-height:420px;min-height:300px}
   .hd{flex-wrap:wrap}
@@ -163,7 +165,7 @@ button{font:inherit;cursor:pointer}
 .pop .cl small{color:var(--muted)}
 
 /* ---------- Step 5: 3D model ---------- */
-.m3d{position:relative;height:220px;background:linear-gradient(180deg,#E6F0FA,#f8fafc);border-radius:7px;overflow:hidden;border:1px solid var(--line)}
+.m3d{position:relative;height:clamp(220px,calc(var(--pw,330px)*.66),560px);background:linear-gradient(180deg,#E6F0FA,#f8fafc);border-radius:7px;overflow:hidden;border:1px solid var(--line)}
 .m3d canvas{display:block}
 .mload{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px;font-weight:600}
 .mreset{position:absolute;right:6px;top:6px;background:#fff;border:1px solid var(--line-2);color:var(--navy);font-weight:700;font-size:11px;padding:3px 8px;border-radius:6px;z-index:2}
@@ -253,3 +255,13 @@ button{font:inherit;cursor:pointer}
 /* Contrast: dark text on the orange Fair color; darker gold text on light gold buttons */
 .pill[style*="E8590C"],.big .sbar i[style*="E8590C"]{color:#1c1917}
 .btn:not(.p):not(.done){color:#7a5800}
+
+/* Drag handle between map and side panel */
+.splitter{cursor:col-resize;display:flex;align-items:center;justify-content:center;touch-action:none;user-select:none;border-radius:6px}
+.splitter span{width:4px;height:44px;border-radius:3px;background:var(--line-2);transition:background .15s,height .15s}
+.splitter:hover span,.splitter:focus-visible span,.splitter.drag span{background:var(--gold);height:72px}
+.splitter:focus-visible{outline:2px solid var(--navy);outline-offset:-2px}
+body.resizing{cursor:col-resize;user-select:none}
+body.resizing #map,body.resizing .panel{pointer-events:none}
+
+@media (max-width:860px){.splitter{display:none}}
