@@ -87,7 +87,7 @@
     ALL = data.rows.map(function (r) {
       var b = {};
       F.forEach(function (f, i) { b[f] = r[i]; });
-      var hay = [b.id, b.name, b.county, b.county + ' county', b.route, b.owner, b.place, b.typeName].join(' ').toLowerCase();
+      var hay = [b.id, b.name, b.alias || '', b.county, b.county + ' county', b.route, b.owner, b.place, b.typeName].join(' ').toLowerCase();
       b.hay = hay;
       b.compact = hay.replace(/[^a-z0-9]/g, '');
       BY_ID[b.id] = b;
@@ -294,30 +294,36 @@
   /* ---------- Bridge panel (Step 3) ---------- */
   var DETAIL = null, detailLoading = null;
   var RATING_WORD = ['failed', 'about to fail', 'critical', 'serious', 'poor', 'fair', 'satisfactory', 'good', 'very good', 'excellent'];
+  // Keys match the bridge-record format in tools/bridge_record.py (same for every FHWA file layout).
   var POSTING = {
-    A: ['open', 'Open, no restrictions'],
-    P: ['posted', 'Open, weight limit posted'],
-    R: ['posted', 'Open, other limits posted (such as speed or trucks at a time)'],
-    B: ['posted', 'Open, weight limit recommended but not yet posted'],
-    D: ['posted', 'Open, but would need limits or closing without temporary supports'],
-    E: ['open', 'Open, temporary bridge in place'],
-    G: ['closed', 'New bridge, not yet open'],
-    K: ['closed', 'Closed to all traffic']
+    open: ['open', 'Open, no restrictions'],
+    open_temp: ['open', 'Open, temporary bridge in place'],
+    open_shored: ['open', 'Open, held up by temporary supports until repairs'],
+    needs_posting: ['posted', 'Open, weight limit recommended but not yet posted'],
+    posted: ['posted', 'Open, weight limit posted'],
+    posted_reduce: ['posted', 'Open, weight limit posted; a lower limit is recommended'],
+    posted_missing: ['posted', 'Open, weight limit posted, but a required sign is missing'],
+    posted_other: ['posted', 'Open, other limits posted (such as speed or trucks at a time)'],
+    not_open: ['closed', 'New bridge, not yet open'],
+    closed: ['closed', 'Closed to all traffic'],
+    unknown: ['open', 'Not listed']
   };
   var SCOUR = {
-    '0': 'Failed from flood erosion and closed.',
-    '1': 'Supports are close to failing from flood erosion. The bridge should be closed.',
-    '2': 'Heavy flood erosion found, and the supports were judged unstable.',
-    '3': 'The supports were judged unstable if a flood erodes the streambed around them.',
-    '4': 'Stable, but exposed foundations need protection.',
-    '5': 'Stable. Expected erosion stays within the footings.',
-    '6': 'Not yet checked for flood erosion.',
-    '7': 'Erosion protection has been put in place.',
-    '8': 'Stable. Expected erosion stays above the footings.',
-    '9': 'Foundations sit on dry land well above flood water.',
-    'N': 'Does not cross water.',
-    'T': 'Over tidal water.',
-    'U': 'Foundation type unknown, so flood erosion risk cannot be judged.'
+    closed: 'Flood erosion has damaged the supports badly enough that the bridge is, or should be, closed.',
+    unstable_seen: 'Flood erosion found at the supports is affecting the strength or stability of the bridge.',
+    critical: 'Engineers judged the supports could become unstable if a flood erodes the streambed around them.',
+    critical_temp: 'Engineers judged the supports could become unstable from flood erosion. Temporary protection is in place.',
+    scour_seen: 'Scour was found that affects the supports, but the bridge has not been rated scour critical.',
+    exposed: 'Stable, but exposed foundations need protection.',
+    protected: 'Stable, with erosion protection in place.',
+    protected_unclear: 'Erosion protection is in place. The federal file does not yet say whether it was engineered.',
+    stable: 'Stable for flood erosion.',
+    dry: 'Foundations sit on dry land well above flood water.',
+    not_checked: 'Not yet checked for flood erosion.',
+    not_checked_temp: 'Not yet checked for flood erosion. Temporary protection is in place.',
+    unknown_foundation: 'Foundation type unknown, so flood erosion risk cannot be judged.',
+    no_water: 'Does not cross water.',
+    tidal: 'Over tidal water.'
   };
   var MONTHS = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 
@@ -347,11 +353,10 @@
     return '<div class="row"><span class="pill" style="background:' + COND_COLOR[w.cls] + '">' + COND[w.cls] + '</span><b>' + label + '</b>' +
       '<small>' + help + '. Rated ' + w.n + ' of 9 (' + w.word + ').</small></div>';
   }
-  function monthYear(mmyy) {
-    if (!mmyy || mmyy.length !== 4) return 'Not listed';
-    var m = parseInt(mmyy.slice(0, 2), 10), y = 2000 + parseInt(mmyy.slice(2), 10);
-    if (y > new Date().getFullYear()) y -= 100;
-    return (MONTHS[m - 1] || '') + ' ' + y;
+  function monthYear(ym) {  // "YYYY-MM"
+    var m = /^(\d{4})-(\d{2})$/.exec(ym || '');
+    if (!m) return 'Not listed';
+    return (MONTHS[parseInt(m[2], 10) - 1] || '') + ' ' + m[1];
   }
   function ft(n) { return n ? fmt(n) + ' ft' : 'Not listed'; }
 
@@ -400,9 +405,9 @@
     }
     h += '</div><div class="overall">Overall: <b style="color:' + COND_COLOR[b.cond] + '">' + COND[b.cond] + '</b>. A bridge is rated by its weakest part' + (isCulvert ? '' : ' (deck, beams or supports)') + '.</div>';
     if (b.scour) {
-      h += '<div class="warnbox">Flood erosion risk at the supports<small>' + esc(SCOUR[d.scourCode] || '') + '</small></div>';
-    } else if (d.scourCode === 'U' || d.scourCode === '6' || d.scourCode === '4') {
-      h += '<div class="infobox">' + esc(SCOUR[d.scourCode]) + '</div>';
+      h += '<div class="warnbox">Flood erosion risk at the supports<small>' + esc(SCOUR[d.scour] || '') + '</small></div>';
+    } else if (['scour_seen', 'unknown_foundation', 'not_checked', 'not_checked_temp', 'exposed', 'protected_unclear'].indexOf(d.scour) >= 0) {
+      h += '<div class="infobox">' + esc(SCOUR[d.scour]) + '</div>';
     }
     h += '</div>';
 
@@ -418,6 +423,7 @@
     var adt = b.adt == null ? 'Not listed' : (b.adtOdd ? fmt(b.adt) + ' (count looks wrong)' : fmt(b.adt) + (d.adtYear ? ' (' + d.adtYear + ' count)' : ''));
     var lanes = d.lanesOn ? d.lanesOn + ' on top' + (d.lanesUnder ? ', ' + d.lanesUnder + ' underneath' : '') : 'Not listed';
     h += '<div class="sec"><div class="lbl">Bridge facts</div><div class="facts">' +
+      (d.commonName ? '<div class="wide"><span>Also known as</span>' + esc(d.commonName) + '</div>' : '') +
       '<div class="wide"><span>Carries</span>' + esc(carries) + '</div>' +
       '<div class="wide"><span>Crosses</span>' + esc(crosses) + '</div>' +
       (b.place ? '<div class="wide"><span>Location</span>' + esc(b.place) + '</div>' : '') +
@@ -429,11 +435,12 @@
       '<div><span>Longest span</span>' + ft(d.maxSpanFt) + '</div>' +
       '<div class="wide"><span>Type</span>' + esc((d.material ? d.material + ', ' : '') + (b.typeName || '').toLowerCase()) + '</div>' +
       '<div><span>Traffic lanes</span>' + lanes + '</div>' +
-      '<div><span>Detour if closed</span>' + (d.detourMi ? d.detourMi + ' mi' : 'Not listed') + '</div>' +
+      '<div><span>Detour if closed</span>' + (d.detourMi ? d.detourMi + ' mi' : d.detourMi === 0 ? 'None needed (bypass nearby)' : 'Not listed') + '</div>' +
       '<div><span>Owner</span>' + (b.wvdoh ? 'WVDOH' : esc(b.owner)) + '</div>' +
       '<div><span>WVDOH district</span>' + (parseInt(d.district, 10) > 0 ? parseInt(d.district, 10) : 'Not listed') + '</div>' +
       '<div><span>Last inspected</span>' + monthYear(d.inspected) + '</div>' +
       '<div><span>Inspected every</span>' + (d.inspectEvery ? d.inspectEvery + ' months' : 'Not listed') + '</div>' +
+      (d.nextInspection ? '<div class="wide"><span>Next inspection due</span>' + monthYear(d.nextInspection) + '</div>' : '') +
       '<div class="wide"><span>National Highway System</span>' + (d.nhs ? 'Yes' : 'No') + '</div>' +
       '</div>' +
       (b.locFlag === 1 ? '<div class="infobox">Map location may be off: it falls a few miles outside the listed county.</div>' : '') +
@@ -691,15 +698,15 @@
       var d = detailFor(b.id) || {}, post = POSTING[d.posting], lp = lowestPart(b);
       var parts = b.name.split(' over ');
       var r = {
-        id: b.id, name: b.name, carries: parts.length > 1 ? parts[0] : d.carries, crosses: parts.length > 1 ? parts.slice(1).join(' over ') : d.crosses,
+        id: b.id, name: b.name, alias: d.commonName || '', carries: parts.length > 1 ? parts[0] : d.carries, crosses: parts.length > 1 ? parts.slice(1).join(' over ') : d.crosses,
         place: b.place, county: b.county, district: parseInt(d.district, 10) > 0 ? parseInt(d.district, 10) : null, route: b.route,
         owner: b.wvdoh ? 'WVDOH' : b.owner, cond: COND[b.cond],
         rDeck: num(d.cDeck), rBeams: num(d.cBeams), rSupports: num(d.cSupports), rCulvert: num(d.cCulvert),
-        lowest: lp.part || '', status: post ? post[1] : '', scour: b.scour ? 'Yes' : 'No', scourText: SCOUR[d.scourCode] || '',
+        lowest: lp.part || '', status: post ? post[1] : '', scour: b.scour ? 'Yes' : 'No', scourText: SCOUR[d.scour] || '',
         year: b.year || null, yearRecon: d.yearRecon || null, adt: b.adt, adtYear: d.adtYear || null, adtNote: b.adtOdd ? 'Count looks wrong in the federal file' : '',
         lengthFt: d.lengthFt || null, widthFt: d.widthFt || null, spans: d.spans || null, maxSpanFt: d.maxSpanFt || null,
-        type: b.typeName, material: d.material, lanesOn: d.lanesOn || null, lanesUnder: d.lanesUnder || null, detourMi: d.detourMi || null,
-        nhs: d.nhs ? 'Yes' : 'No', inspected: monthYear(d.inspected), inspectEvery: d.inspectEvery || null,
+        type: b.typeName, material: d.material, lanesOn: d.lanesOn || null, lanesUnder: d.lanesUnder || null, detourMi: d.detourMi == null ? null : d.detourMi,
+        nhs: d.nhs ? 'Yes' : 'No', inspected: monthYear(d.inspected), inspectEvery: d.inspectEvery || null, nextInsp: d.nextInspection ? monthYear(d.nextInspection) : '',
         cam: b.cams ? 'Yes' : 'No', camIds: b.cams ? b.cams.map(function (m) { return m[0]; }).join(', ') : '',
         lat: b.lat, lon: b.lon, locNote: b.lat == null ? 'No map location in the federal file' : b.locFlag === 1 ? 'May be off: a few miles outside the listed county' : '',
         link: base + '#bridge=' + encodeURIComponent(b.id)
@@ -708,7 +715,7 @@
     });
   }
   var XCOLS = [
-    { h: 'Bridge ID', k: 'id', w: 17 }, { h: 'Bridge', k: 'name', w: 40 }, { h: 'Carries', k: 'carries', w: 24 }, { h: 'Crosses', k: 'crosses', w: 24 },
+    { h: 'Bridge ID', k: 'id', w: 17 }, { h: 'Bridge', k: 'name', w: 40 }, { h: 'Also known as', k: 'alias', w: 28 }, { h: 'Carries', k: 'carries', w: 24 }, { h: 'Crosses', k: 'crosses', w: 24 },
     { h: 'Location', k: 'place', w: 28 }, { h: 'County', k: 'county', w: 12 }, { h: 'WVDOH district', k: 'district', w: 9 }, { h: 'Route', k: 'route', w: 9 },
     { h: 'Owner', k: 'owner', w: 20 }, { h: 'Condition', k: 'cond', w: 10 },
     { h: 'Deck rating (0-9)', k: 'rDeck', w: 9 }, { h: 'Beams rating (0-9)', k: 'rBeams', w: 9 }, { h: 'Supports rating (0-9)', k: 'rSupports', w: 10 },
@@ -719,7 +726,7 @@
     { h: 'Length (ft)', k: 'lengthFt', w: 9, num: 'int' }, { h: 'Deck width (ft)', k: 'widthFt', w: 9, num: 'dec' }, { h: 'Spans', k: 'spans', w: 7 },
     { h: 'Longest span (ft)', k: 'maxSpanFt', w: 9, num: 'int' }, { h: 'Type', k: 'type', w: 20 }, { h: 'Material', k: 'material', w: 22 },
     { h: 'Lanes on bridge', k: 'lanesOn', w: 8 }, { h: 'Lanes underneath', k: 'lanesUnder', w: 9 }, { h: 'Detour if closed (mi)', k: 'detourMi', w: 9 },
-    { h: 'National Highway System', k: 'nhs', w: 10 }, { h: 'Last inspected', k: 'inspected', w: 14 }, { h: 'Inspected every (months)', k: 'inspectEvery', w: 10 },
+    { h: 'National Highway System', k: 'nhs', w: 10 }, { h: 'Last inspected', k: 'inspected', w: 14 }, { h: 'Inspected every (months)', k: 'inspectEvery', w: 10 }, { h: 'Next inspection due', k: 'nextInsp', w: 14 },
     { h: 'Live camera', k: 'cam', w: 8 }, { h: 'Camera IDs', k: 'camIds', w: 16 }, { h: 'Latitude', k: 'lat', w: 11 }, { h: 'Longitude', k: 'lon', w: 11 },
     { h: 'Map location note', k: 'locNote', w: 30 }, { h: 'Open in Bridge Explorer', k: 'link', w: 50 }
   ];
@@ -836,7 +843,7 @@
       model = m.mountModel(el, spec, function (part) {
         var t = $('mpick'); if (!t) return;
         if (!part) { t.textContent = 'Drag to spin, scroll or pinch to zoom. Tap a part to see its rating.'; return; }
-        t.textContent = part === 'scour' ? 'Flood erosion risk at the supports. ' + (SCOUR[d.scourCode] || '') : spec.parts[part].text;
+        t.textContent = part === 'scour' ? 'Flood erosion risk at the supports. ' + (SCOUR[d.scour] || '') : spec.parts[part].text;
       });
       $('mreset').addEventListener('click', function () { model && model.reset(); });
       if (model.partial) $('mpick').textContent = 'Showing the middle spans of this long bridge. Scroll or pinch out to see all of it. Tap a part to see its rating.';
@@ -1081,8 +1088,20 @@
       apply(false);
       $('loading').hidden = true;
       var m = location.hash.match(/bridge=([^&]+)/);
-      if (m) select(decodeURIComponent(m[1]), true);
-      else homeView();
+      var linked = m ? decodeURIComponent(m[1]) : null;
+      if (linked && BY_ID[linked]) select(linked, true);
+      else {
+        homeView();
+        if (linked) {
+          // A saved link to a bridge that is not in the current federal file (replaced, removed or renumbered).
+          history.replaceState(null, '', location.pathname + location.search);
+          var n = $('linknote');
+          if (n) {
+            n.textContent = 'Bridge ' + linked + ' is not in the ' + (META.edition || 'current') + ' federal bridge file, so it is not on the map. It may have been replaced, removed or given a new ID.';
+            n.hidden = false; setTimeout(function () { n.hidden = true; }, 15000);
+          }
+        }
+      }
     }).catch(function (err) {
       var el = $('loading');
       el.textContent = 'The bridge data could not be loaded. Refresh the page to try again.';
@@ -1111,7 +1130,10 @@
     baseNoteShown = true;
     setBase('photo');
     var n = $('basenote');
-    if (n) { n.hidden = false; setTimeout(hideBaseNote, 15000); }
+    if (n) {
+      n.innerHTML = 'The labeled satellite map isn\u2019t loading from USGS right now, so the map is showing <b>Photo only</b>. You can switch back with the buttons above.';
+      n.hidden = false; setTimeout(hideBaseNote, 15000);
+    }
   }
   var probes = ['7/48/35', '7/48/36', '7/49/35'].map(function (t) {
     return fetch(USGS + 'USGSImageryTopo/MapServer/tile/' + t, { mode: 'cors', cache: 'no-store' })
