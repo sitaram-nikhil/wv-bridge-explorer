@@ -16,9 +16,61 @@
   var CAMS = null, CAM_BRIDGES = {}, META, ALL = [], BY_ID = {}, COUNTY_BOUNDS = {}, shown = [], selectedId = null, popup = null, is3D = true;
 
   /* ---------- Map ---------- */
+  // Backgrounds. "Satellite" and "Photo only" share the same photos: 2024 WV aerial photos from the
+  // WV GIS Technical Center (WVU), with USGS photos underneath for the area outside WV and below
+  // zoom 10, where the USGS photos look better. "Satellite" adds road, place and water names from OpenFreeMap (OpenStreetMap).
+  // USGS retired its labeled imagery service (USGSImageryTopo) on November 16, 2026.
+  var WVGIS = 'https://services.wvgis.wvu.edu/arcgis/rest/services/Imagery_BaseMaps_EarthCover/wv_imagery_NAIP_2024_60cm/MapServer/tile/';
+  var WVGIS_ATTR = 'WV photos: <a href="https://www.mapwv.gov/" target="_blank" rel="noopener">USDA NAIP 2024 via WV GIS Technical Center</a>';
+  var OFM_ATTR = 'Labels: <a href="https://openfreemap.org" target="_blank" rel="noopener">OpenFreeMap</a> <a href="https://www.openmaptiles.org/" target="_blank" rel="noopener">&copy; OpenMapTiles</a> Data from <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+  // The WV tile cache starts at web zoom 8 as its level 0, so shift the zoom. Tiles with no
+  // photo (the edges of the state) come back as a transparent tile, so USGS shows through.
+  var CLEAR_PNG = Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg=='), function (c) { return c.charCodeAt(0); }).buffer;
+  maplibregl.addProtocol('wvnaip', function (params, abort) {
+    var m = params.url.match(/(\d+)\/(\d+)\/(\d+)$/), z = +m[1] - 8;
+    if (z < 0) return Promise.resolve({ data: CLEAR_PNG });
+    return fetch(WVGIS + z + '/' + m[3] + '/' + m[2], { signal: abort.signal, mode: 'cors' })
+      .then(function (r) { return r.ok ? r.arrayBuffer() : CLEAR_PNG; }, function (e) { if (e.name === 'AbortError') throw e; return CLEAR_PNG; })
+      .then(function (buf) { return { data: buf }; });
+  });
   function raster(service, maxzoom) {
     return { type: 'raster', tiles: [USGS + service + '/MapServer/tile/{z}/{y}/{x}'], tileSize: 256, maxzoom: maxzoom, attribution: USGS_ATTR };
   }
+  var LBL_FONT = ['Noto Sans Regular'], LBL_BOLD = ['Noto Sans Bold'], LBL_ITALIC = ['Noto Sans Italic'];
+  var HALO = { 'text-color': '#ffffff', 'text-halo-color': 'rgba(0,20,40,0.85)', 'text-halo-width': 1.4 };
+  var LABEL_LAYERS = [
+    { id: 'lbl-roads', type: 'line', source: 'ofm', 'source-layer': 'transportation', minzoom: 9,
+      filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary', 'secondary']]],
+      paint: { 'line-color': '#ffe9a8', 'line-opacity': ['interpolate', ['linear'], ['zoom'], 9, 0.35, 13, 0.55], 'line-width': ['interpolate', ['linear'], ['zoom'], 9, 0.6, 14, 2] } },
+    { id: 'lbl-water', type: 'symbol', source: 'ofm', 'source-layer': 'waterway', minzoom: 11,
+      filter: ['in', ['get', 'class'], ['literal', ['river', 'stream']]],
+      layout: { 'symbol-placement': 'line', 'text-field': ['get', 'name'], 'text-font': LBL_ITALIC, 'text-size': 11, 'symbol-spacing': 400 },
+      paint: { 'text-color': '#cfe8ff', 'text-halo-color': 'rgba(0,20,40,0.85)', 'text-halo-width': 1.2 } },
+    { id: 'lbl-road-names', type: 'symbol', source: 'ofm', 'source-layer': 'transportation_name', minzoom: 12,
+      layout: { 'symbol-placement': 'line', 'text-field': ['coalesce', ['get', 'name'], ['get', 'ref']], 'text-font': LBL_FONT, 'text-size': 11, 'symbol-spacing': 350 },
+      paint: HALO },
+    { id: 'lbl-road-refs', type: 'symbol', source: 'ofm', 'source-layer': 'transportation_name', minzoom: 9,
+      filter: ['all', ['has', 'ref'], ['in', ['get', 'class'], ['literal', ['motorway', 'trunk', 'primary']]]],
+      layout: { 'symbol-placement': 'line', 'text-field': ['get', 'ref'], 'text-font': LBL_BOLD, 'text-size': 11, 'symbol-spacing': 500, 'text-rotation-alignment': 'viewport' },
+      paint: { 'text-color': '#002855', 'text-halo-color': '#EAAA00', 'text-halo-width': 2.2 } },
+    { id: 'lbl-places', type: 'symbol', source: 'ofm', 'source-layer': 'place',
+      filter: ['in', ['get', 'class'], ['literal', ['city', 'town', 'village', 'hamlet']]],
+      minzoom: 6,
+      layout: {
+        'text-field': ['get', 'name'], 'text-font': LBL_BOLD,
+        'text-size': ['match', ['get', 'class'], 'city', 14, 'town', 12.5, 11],
+        'symbol-sort-key': ['get', 'rank']
+      },
+      paint: HALO }
+  ];
+  // Hide the smaller places until you zoom in. WV's largest places are 'town' in OpenStreetMap.
+  LABEL_LAYERS[4].filter = ['any',
+    ['==', ['get', 'class'], 'city'],
+    ['all', ['==', ['get', 'class'], 'town'], ['>=', ['zoom'], 7]],
+    ['all', ['==', ['get', 'class'], 'village'], ['>=', ['zoom'], 10]],
+    ['all', ['==', ['get', 'class'], 'hamlet'], ['>=', ['zoom'], 12.5]]];
+  LABEL_LAYERS.forEach(function (l) { l.layout = Object.assign({ visibility: 'visible' }, l.layout || {}); });
+  var LABEL_IDS = LABEL_LAYERS.map(function (l) { return l.id; });
   var map = new maplibregl.Map({
     container: 'map',
     bounds: WV_BOUNDS,
@@ -27,10 +79,12 @@
     attributionControl: { compact: true },
     style: {
       version: 8,
+      glyphs: 'https://tiles.openfreemap.org/fonts/{fontstack}/{range}.pbf',
       sources: {
-        hybrid: raster('USGSImageryTopo', 16),
         photo: raster('USGSImageryOnly', 16),
+        wvphoto: { type: 'raster', tiles: ['wvnaip://{z}/{x}/{y}'], tileSize: 256, minzoom: 10, maxzoom: 19, bounds: [-82.7, 37.15, -77.65, 40.66], attribution: WVGIS_ATTR },
         topo: raster('USGSTopo', 16),
+        ofm: { type: 'vector', url: 'https://tiles.openfreemap.org/planet', attribution: OFM_ATTR },
         dem: {
           type: 'raster-dem', encoding: 'terrarium', tileSize: 256, maxzoom: 14,
           tiles: ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png'],
@@ -39,18 +93,23 @@
       },
       layers: [
         { id: 'bg', type: 'background', paint: { 'background-color': '#2b3a2c' } },
-        { id: 'hybrid', type: 'raster', source: 'hybrid' },
-        { id: 'photo', type: 'raster', source: 'photo', layout: { visibility: 'none' } },
+        { id: 'photo', type: 'raster', source: 'photo' },
+        { id: 'wvphoto', type: 'raster', source: 'wvphoto', paint: { 'raster-fade-duration': 150 } },
         { id: 'topo', type: 'raster', source: 'topo', layout: { visibility: 'none' } }
-      ]
+      ].concat(LABEL_LAYERS)
     }
   });
   window.bridgeMap = map;
   map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right');
   map.addControl(new maplibregl.ScaleControl({ unit: 'imperial' }), 'bottom-right');
 
+  // name: 'hybrid' (Satellite: photos + labels), 'photo' (photos only) or 'topo' (USGS map).
   function setBase(name) {
-    ['hybrid', 'photo', 'topo'].forEach(function (b) { map.setLayoutProperty(b, 'visibility', b === name ? 'visible' : 'none'); });
+    var photos = name !== 'topo' ? 'visible' : 'none';
+    map.setLayoutProperty('photo', 'visibility', photos);
+    map.setLayoutProperty('wvphoto', 'visibility', photos);
+    map.setLayoutProperty('topo', 'visibility', name === 'topo' ? 'visible' : 'none');
+    LABEL_IDS.forEach(function (id) { if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', name === 'hybrid' ? 'visible' : 'none'); });
     document.querySelectorAll('.basemap button').forEach(function (btn) { btn.classList.toggle('on', btn.dataset.base === name); });
   }
   function set3D(on) {
@@ -1117,40 +1176,4 @@
     setTimeout(function () { if (!$('loading').hidden || !started) { map.resize(); map.triggerRepaint(); if (!started && map.isStyleLoaded()) start(); } }, ms);
   });
 
-  // If the labeled satellite map keeps failing at USGS, switch to Photo only and say so.
-  var baseChosen = false, hybridErrors = 0, baseNoteShown = false;
-  document.querySelectorAll('.basemap button').forEach(function (btn) { btn.addEventListener('click', function () { baseChosen = true; hideBaseNote(); }); });
-  function hideBaseNote() { var n = $('basenote'); if (n) n.hidden = true; }
-  // The map library ignores 'not found' tiles silently, so check the USGS service directly:
-  // a quick test of three statewide tiles at startup, plus a count of failed tiles while browsing
-  // (browsers that report tile status, such as Chrome and Edge).
-  function hybridFailing() {
-    if (baseChosen || baseNoteShown) return;
-    if (!map.getLayer('hybrid') || map.getLayoutProperty('hybrid', 'visibility') === 'none') return;
-    baseNoteShown = true;
-    setBase('photo');
-    var n = $('basenote');
-    if (n) {
-      n.innerHTML = 'The labeled satellite map isn\u2019t loading from USGS right now, so the map is showing <b>Photo only</b>. You can switch back with the buttons above.';
-      n.hidden = false; setTimeout(hideBaseNote, 15000);
-    }
-  }
-  var probes = ['7/48/35', '7/48/36', '7/49/35'].map(function (t) {
-    return fetch(USGS + 'USGSImageryTopo/MapServer/tile/' + t, { mode: 'cors', cache: 'no-store' })
-      .then(function (r) { return r.ok; }, function () { return false; });
-  });
-  Promise.all(probes).then(function (ok) {
-    if (ok.filter(function (x) { return !x; }).length >= 2) {
-      if (started && map.isStyleLoaded()) hybridFailing(); else map.once('style.load', hybridFailing);
-    }
-  });
-  if (window.PerformanceObserver) {
-    try {
-      new PerformanceObserver(function (list) {
-        list.getEntries().forEach(function (e) {
-          if (e.name.indexOf('USGSImageryTopo') !== -1 && e.responseStatus >= 400) { hybridErrors++; if (hybridErrors >= 8) hybridFailing(); }
-        });
-      }).observe({ type: 'resource', buffered: true });
-    } catch (e) {}
-  }
 })();
