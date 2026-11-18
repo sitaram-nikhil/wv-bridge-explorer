@@ -13,7 +13,9 @@ A free web map of West Virginia's 7,345 public bridges and their condition, buil
 |---|---|
 | Bridges and ratings | FHWA National Bridge Inventory, West Virginia, 2026 file (new SNBI layout) |
 | Live cameras | WV511 (WVDOH) |
-| Map imagery and topographic maps | USGS The National Map (public domain) |
+| Map photos | USDA NAIP 2024 aerial photos via the WV GIS Technical Center (WVU); USGS The National Map photos outside WV and when zoomed out (public domain) |
+| Map labels | OpenFreeMap vector tiles, from OpenStreetMap data (ODbL); no key needed |
+| Topographic map | USGS The National Map (public domain) |
 | 3D hills | AWS Terrain Tiles (open data) |
 
 The data is as of the federal file. To update it, see `tools/README.md`.
